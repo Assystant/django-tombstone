@@ -10,7 +10,7 @@ from .managers import TombstoneManager
 from .exceptions import TombstoneError
 from .signals import pre_tombstone, post_tombstone
 
-_MIXIN_FIELDS = frozenset({"is_tombstone", "tombstoned_at", "tombstone_origin_id"})
+_MIXIN_FIELDS = frozenset({"is_tombstone", "tombstoned_at", "tombstone_origin_id", "tombstone_label"})
 
 REF_DELETE = "delete"
 REF_KEEP   = "keep"
@@ -56,10 +56,12 @@ class TombstoneMixin(models.Model):
     is_tombstone = models.BooleanField(default=False, db_index=True)
     tombstoned_at = models.DateTimeField(null=True, blank=True, db_index=True)
     tombstone_origin_id = models.CharField(max_length=255, null=True, blank=True)
+    tombstone_label = models.CharField(max_length=512, null=True, blank=True)
 
     objects = TombstoneManager()
 
     tombstone_ref_behavior = _UNSET
+    tombstone_label_field = _UNSET
 
     class Meta:
         abstract = True
@@ -83,6 +85,7 @@ class TombstoneMixin(models.Model):
         try:
             pre_tombstone.send(sender=self.__class__, instance=self)
             with transaction.atomic(using=db):
+                self.tombstone_label = self._build_deleted_label()
                 self._clear_business_fields()
                 self.is_tombstone = True
                 self.tombstoned_at = timezone.now()
@@ -130,6 +133,43 @@ class TombstoneMixin(models.Model):
                     field.through._default_manager.using(db).filter(
                         **{field.field.m2m_field_name(): self.pk}
                     ).delete()
+
+    def _build_deleted_label(self) -> str:
+        fmt = tombstone_settings.DELETED_LABEL_FORMAT
+        label_field = self.tombstone_label_field
+
+        if isinstance(label_field, _Unset):
+            value = self.__class__.__name__
+        elif isinstance(label_field, str):
+            raw = str(getattr(self, label_field, "") or "")
+            if raw:
+                value = f"({raw})" if "email" in label_field else raw
+            else:
+                value = self.__class__.__name__
+        else:
+            value = self._resolve_label_from_fields(list(label_field))
+
+        return fmt.replace("%", value)
+
+    def _resolve_label_from_fields(self, field_names: list) -> str:
+        email_fields = [f for f in field_names if "email" in f]
+        other_fields = [f for f in field_names if "email" not in f]
+
+        if other_fields:
+            available = [
+                str(getattr(self, f, "") or "")
+                for f in other_fields
+                if str(getattr(self, f, "") or "")
+            ]
+            if available:
+                return " ".join(available)
+
+        for f in email_fields:
+            v = str(getattr(self, f, "") or "")
+            if v:
+                return f"({v})"
+
+        return self.__class__.__name__
 
     def _resolved_behaviour(self, accessor: str) -> str:
         ref_behavior = self.tombstone_ref_behavior

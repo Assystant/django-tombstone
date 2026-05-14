@@ -5,6 +5,8 @@ from tests.models import (
     Author, Book, Club, Membership,
     Product, ProductBook,
     UniqueCodeItem,
+    ArticleWithLabel, ItemWithLabel, WidgetWithOptionalLabel,
+    ProfileWithEmail, RecordWithEmailFallback, MultiFieldRecord,
 )
 from tombstone.conf import tombstone_settings
 from tombstone.exceptions import TombstoneError
@@ -258,3 +260,113 @@ class TestGuardRails(TestCase):
 
         with self.assertRaises(TombstoneError):
             author.delete()
+
+
+class TestDeletedLabel(TestCase):
+    def tearDown(self):
+        tombstone_settings.reload()
+
+    # -- basic label building --------------------------------------------------
+
+    def test_single_field_label(self):
+        obj = ArticleWithLabel.objects.create(title="My Article", body="some content")
+        tombstone = obj.delete()
+        self.assertIn("My Article", tombstone.tombstone_label)
+
+    def test_multiple_field_label(self):
+        obj = ItemWithLabel.objects.create(title="Invoice Q1", code="INV-001")
+        tombstone = obj.delete()
+        self.assertIn("Invoice Q1", tombstone.tombstone_label)
+        self.assertIn("INV-001", tombstone.tombstone_label)
+
+    def test_empty_field_falls_back_to_class_name(self):
+        obj = WidgetWithOptionalLabel.objects.create(name="")
+        tombstone = obj.delete()
+        self.assertIn("WidgetWithOptionalLabel", tombstone.tombstone_label)
+
+    def test_no_label_field_falls_back_to_class_name(self):
+        author = Author.objects.create(name="Alice", email="alice@example.com")
+        tombstone = author.delete()
+        self.assertIn("Author", tombstone.tombstone_label)
+
+    # -- DELETED_LABEL_FORMAT -------------------------------------------------
+
+    def test_default_format_applied(self):
+        obj = ArticleWithLabel.objects.create(title="Test Article", body="")
+        tombstone = obj.delete()
+        self.assertEqual(tombstone.tombstone_label, "Deleted - Test Article")
+
+    def test_format_percent_replaced(self):
+        with override_settings(TOMBSTONE={"DELETED_LABEL_FORMAT": "Archived: %"}):
+            tombstone_settings.reload()
+            obj = ArticleWithLabel.objects.create(title="Widget", body="")
+            tombstone = obj.delete()
+            self.assertEqual(tombstone.tombstone_label, "Archived: Widget")
+
+    def test_format_with_no_prefix(self):
+        with override_settings(TOMBSTONE={"DELETED_LABEL_FORMAT": "%"}):
+            tombstone_settings.reload()
+            obj = ArticleWithLabel.objects.create(title="Widget", body="")
+            tombstone = obj.delete()
+            self.assertEqual(tombstone.tombstone_label, "Widget")
+
+    # -- email detection ------------------------------------------------------
+
+    def test_single_email_field_wrapped_in_brackets(self):
+        obj = ProfileWithEmail.objects.create(email="alice@example.com")
+        tombstone = obj.delete()
+        self.assertIn("(alice@example.com)", tombstone.tombstone_label)
+
+    def test_single_empty_email_field_falls_back_to_class_name(self):
+        obj = ProfileWithEmail.objects.create(email="")
+        tombstone = obj.delete()
+        self.assertIn("ProfileWithEmail", tombstone.tombstone_label)
+
+    # -- smart fallback chain -------------------------------------------------
+
+    def test_fallback_chain_all_fields_combined(self):
+        """All non-email fields non-empty → joined together."""
+        obj = RecordWithEmailFallback.objects.create(
+            title="Project Alpha", code="PRJ-001", contact_email="ops@example.com"
+        )
+        tombstone = obj.delete()
+        self.assertIn("Project Alpha PRJ-001", tombstone.tombstone_label)
+
+    def test_fallback_chain_first_field_only(self):
+        """Second non-email field empty → uses first field alone."""
+        obj = RecordWithEmailFallback.objects.create(
+            title="Project Alpha", code="", contact_email="ops@example.com"
+        )
+        tombstone = obj.delete()
+        self.assertIn("Project Alpha", tombstone.tombstone_label)
+        self.assertNotIn("(ops@example.com)", tombstone.tombstone_label)
+
+    def test_fallback_chain_second_field_only(self):
+        """First non-email field empty → uses second field alone."""
+        obj = RecordWithEmailFallback.objects.create(
+            title="", code="PRJ-001", contact_email="ops@example.com"
+        )
+        tombstone = obj.delete()
+        self.assertIn("PRJ-001", tombstone.tombstone_label)
+
+    def test_fallback_chain_email_when_other_fields_empty(self):
+        """All non-email fields empty → falls back to email wrapped in brackets."""
+        obj = RecordWithEmailFallback.objects.create(
+            title="", code="", contact_email="ops@example.com"
+        )
+        tombstone = obj.delete()
+        self.assertIn("(ops@example.com)", tombstone.tombstone_label)
+
+    def test_fallback_chain_class_name_when_all_empty(self):
+        """All fields empty → falls back to model class name."""
+        obj = RecordWithEmailFallback.objects.create(
+            title="", code="", contact_email=""
+        )
+        tombstone = obj.delete()
+        self.assertIn("RecordWithEmailFallback", tombstone.tombstone_label)
+
+    def test_fallback_chain_joins_all_available_fields(self):
+        """Partial data: joins ALL non-empty non-email fields, not just the first."""
+        obj = MultiFieldRecord.objects.create(title="Project Alpha", code="", reference="REF-001")
+        tombstone = obj.delete()
+        self.assertEqual(tombstone.tombstone_label, "Deleted - Project Alpha REF-001")

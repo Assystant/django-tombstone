@@ -73,3 +73,69 @@ class UniqueCodeItem(TombstoneMixin, models.Model):
 
     class Meta:
         app_label = "tests"
+
+
+class ArticleWithLabel(TombstoneMixin, models.Model):
+    """tombstone_label_field = single string field."""
+    title = models.CharField(max_length=200)
+    body = models.TextField(blank=True, default="")
+
+    tombstone_label_field = "title"
+
+    class Meta:
+        app_label = "tests"
+
+
+class ItemWithLabel(TombstoneMixin, models.Model):
+    """tombstone_label_field = list of two generic fields."""
+    title = models.CharField(max_length=200, blank=True, default="")
+    code = models.CharField(max_length=50, blank=True, default="")
+
+    tombstone_label_field = ["title", "code"]
+
+    class Meta:
+        app_label = "tests"
+
+
+class WidgetWithOptionalLabel(TombstoneMixin, models.Model):
+    """tombstone_label_field set, but value may be empty — should fall back to class name."""
+    name = models.CharField(max_length=200, blank=True, default="")
+
+    tombstone_label_field = "name"
+
+    class Meta:
+        app_label = "tests"
+
+
+class ProfileWithEmail(TombstoneMixin, models.Model):
+    """tombstone_label_field = single email field — value wrapped in brackets."""
+    email = models.EmailField(blank=True, default="")
+
+    tombstone_label_field = "email"
+
+    class Meta:
+        app_label = "tests"
+
+
+class RecordWithEmailFallback(TombstoneMixin, models.Model):
+    """tombstone_label_field list with generic fields + email as last-resort fallback."""
+    title = models.CharField(max_length=200, blank=True, default="")
+    code = models.CharField(max_length=50, blank=True, default="")
+    contact_email = models.EmailField(blank=True, default="")
+
+    tombstone_label_field = ["title", "code", "contact_email"]
+
+    class Meta:
+        app_label = "tests"
+
+
+class MultiFieldRecord(TombstoneMixin, models.Model):
+    """Three non-email fields — proves that all available values are joined, not just the first."""
+    title = models.CharField(max_length=200, blank=True, default="")
+    code = models.CharField(max_length=50, blank=True, default="")
+    reference = models.CharField(max_length=50, blank=True, default="")
+
+    tombstone_label_field = ["title", "code", "reference"]
+
+    class Meta:
+        app_label = "tests"
