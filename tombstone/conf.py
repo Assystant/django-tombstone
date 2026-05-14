@@ -2,7 +2,8 @@ from django.conf import settings
 from django.test.signals import setting_changed
 
 DEFAULTS = {
-    'DEFAULT_REF_BEHAVIOR': 'keep',  # FK stays valid naturally — no action needed
+    'DEFAULT_REF_BEHAVIOR': 'keep',       # FK stays valid naturally — no action needed
+    'DELETED_LABEL_FORMAT': 'Deleted - %', # % is replaced by the resolved label value
 }
 
 
