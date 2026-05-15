@@ -1,0 +1,2 @@
+class TombstoneError(Exception):
+    pass
