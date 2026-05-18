@@ -8,6 +8,7 @@ from tests.models import (
     UniqueCodeItem,
     ArticleWithLabel, ItemWithLabel, WidgetWithOptionalLabel,
     ProfileWithEmail, RecordWithEmailFallback, MultiFieldRecord,
+    ItemWithAutoNow, ItemWithPreservedField,
     BookWithAllObjects,
 )
 from tombstone import AllObjectsManager, TombstoneSerializerMixin
@@ -431,3 +432,36 @@ class TestTombstoneSerializerMixin(TestCase):
 
         self.assertFalse(data['is_tombstone'])
         self.assertEqual(data['title'], "Active Article")
+
+
+class TestClearBusinessFields(TestCase):
+    def test_auto_now_add_field_not_cleared(self):
+        item = ItemWithAutoNow.objects.create(title="Test")
+        tombstone = item.delete()
+        self.assertIsNotNone(tombstone.created_at)
+
+    def test_auto_now_field_not_cleared(self):
+        item = ItemWithAutoNow.objects.create(title="Test")
+        tombstone = item.delete()
+        self.assertIsNotNone(tombstone.updated_at)
+
+    def test_auto_now_field_not_in_tombstone_as_none(self):
+        item = ItemWithAutoNow.objects.create(title="Test")
+        tombstone = item.delete()
+        # title is cleared, auto fields are untouched
+        self.assertEqual(tombstone.title, "")
+        self.assertIsNotNone(tombstone.updated_at)
+
+    def test_preserve_fields_survive_clearing(self):
+        item = ItemWithPreservedField.objects.create(
+            title="Widget", category="Electronics"
+        )
+        tombstone = item.delete()
+        self.assertEqual(tombstone.category, "Electronics")
+
+    def test_non_preserved_fields_are_cleared(self):
+        item = ItemWithPreservedField.objects.create(
+            title="Widget", category="Electronics"
+        )
+        tombstone = item.delete()
+        self.assertEqual(tombstone.title, "")

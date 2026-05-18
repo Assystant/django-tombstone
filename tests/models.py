@@ -141,6 +141,27 @@ class MultiFieldRecord(TombstoneMixin, models.Model):
         app_label = "tests"
 
 
+class ItemWithAutoNow(TombstoneMixin, models.Model):
+    """Tests that auto_now / auto_now_add fields are skipped during clearing."""
+    title = models.CharField(max_length=200)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'tests'
+
+
+class ItemWithPreservedField(TombstoneMixin, models.Model):
+    """Tests tombstone_preserve_fields — specified fields survive clearing."""
+    title = models.CharField(max_length=200)
+    category = models.CharField(max_length=100)
+
+    tombstone_preserve_fields = ['category']
+
+    class Meta:
+        app_label = 'tests'
+
+
 class BookWithAllObjects(models.Model):
     """FK to Author — used to test base_manager_name behaviour."""
     title = models.CharField(max_length=200)

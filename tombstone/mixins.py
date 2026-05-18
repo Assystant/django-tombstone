@@ -63,6 +63,7 @@ class TombstoneMixin(models.Model):
 
     tombstone_ref_behavior = _UNSET
     tombstone_label_field = _UNSET
+    tombstone_preserve_fields = _UNSET
 
     class Meta:
         abstract = True
@@ -105,21 +106,38 @@ class TombstoneMixin(models.Model):
     # ------------------------------------------------------------------
 
     def _clear_business_fields(self):
+        preserve = (
+            set(self.tombstone_preserve_fields)
+            if not isinstance(self.tombstone_preserve_fields, _Unset)
+            else set()
+        )
         for field in self._meta.concrete_fields:
-            if field.primary_key or field.name in _MIXIN_FIELDS:
+            if self._should_skip_field(field, preserve):
                 continue
+            self._apply_field_clear(field)
 
-            if field.is_relation:
-                if field.null:
-                    setattr(self, field.attname, None)
-                continue
+    def _should_skip_field(self, field, preserve):
+        if field.primary_key or field.name in _MIXIN_FIELDS:
+            return True
+        if field.name in preserve or field.attname in preserve:
+            return True
+        # auto_now is overwritten by Django in pre_save;
+        # auto_now_add is excluded from UPDATE queries entirely.
+        if getattr(field, 'auto_now', False) or getattr(field, 'auto_now_add', False):
+            return True
+        return False
 
-            if getattr(field, 'unique', False) and not field.null:
-                setattr(self, field.attname, f"__tombstoned__{uuid.uuid4().hex}")
-            elif field.null:
+    def _apply_field_clear(self, field):
+        if field.is_relation:
+            if field.null:
                 setattr(self, field.attname, None)
-            else:
-                setattr(self, field.attname, field.get_default())
+            return
+        if getattr(field, 'unique', False) and not field.null:
+            setattr(self, field.attname, f"__tombstoned__{uuid.uuid4().hex}")
+        elif field.null:
+            setattr(self, field.attname, None)
+        else:
+            setattr(self, field.attname, field.get_default())
 
     def _handle_delete_refs(self, db):
         for field in self._meta.get_fields():
