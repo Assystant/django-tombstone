@@ -25,8 +25,6 @@ class TombstoneQuerySet(models.QuerySet):
 
 
 class TombstoneManager(models.Manager):
-    use_in_migrations = True
-
     def get_queryset(self):
         return TombstoneQuerySet(self.model, using=self._db).active()
 
@@ -34,11 +32,4 @@ class TombstoneManager(models.Manager):
         return TombstoneQuerySet(self.model, using=self._db).tombstones()
 
     def all_records(self):
-        return TombstoneQuerySet(self.model, using=self._db)
-
-
-class AllObjectsManager(models.Manager):
-    use_in_migrations = True
-
-    def get_queryset(self):
         return TombstoneQuerySet(self.model, using=self._db)
