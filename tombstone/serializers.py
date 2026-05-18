@@ -1,3 +1,6 @@
+from collections import OrderedDict
+
+
 class TombstoneSerializerMixin:
     """
     Add to any DRF ModelSerializer to render tombstone placeholder records.
@@ -14,14 +17,14 @@ class TombstoneSerializerMixin:
 
     def to_representation(self, instance):
         if getattr(instance, 'is_tombstone', False):
-            return {
-                'id': instance.pk,
-                'is_tombstone': True,
-                'tombstone_label': instance.tombstone_label,
-                'tombstone_origin_id': instance.tombstone_origin_id,
-                'tombstoned_at': (
+            return OrderedDict([
+                ('id', instance.pk),
+                ('is_tombstone', True),
+                ('tombstone_label', instance.tombstone_label),
+                ('tombstone_origin_id', instance.tombstone_origin_id),
+                ('tombstoned_at', (
                     instance.tombstoned_at.isoformat()
                     if instance.tombstoned_at else None
-                ),
-            }
+                )),
+            ])
         return super().to_representation(instance)

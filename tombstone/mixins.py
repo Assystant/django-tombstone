@@ -127,12 +127,22 @@ class TombstoneMixin(models.Model):
                 continue
             if isinstance(field, ManyToOneRel):
                 if self._resolved_behaviour(field.get_accessor_name()) == REF_DELETE:
-                    field.related_model._base_manager.using(db).filter(
+                    mgr = getattr(
+                        field.related_model,
+                        'all_objects',
+                        field.related_model._default_manager,
+                    )
+                    mgr.using(db).filter(
                         **{field.field.name: self.pk}
                     ).delete()
             elif isinstance(field, ManyToManyRel):
                 if self._resolved_behaviour(field.get_accessor_name()) == REF_DELETE:
-                    field.through._default_manager.using(db).filter(
+                    mgr = getattr(
+                        field.through,
+                        'all_objects',
+                        field.through._default_manager,
+                    )
+                    mgr.using(db).filter(
                         **{field.field.m2m_field_name(): self.pk}
                     ).delete()
 
@@ -151,7 +161,7 @@ class TombstoneMixin(models.Model):
         else:
             value = self._resolve_label_from_fields(list(label_field))
 
-        return fmt.replace("%", value)
+        return fmt.replace("%", value)[:512]
 
     def _resolve_label_from_fields(self, field_names: list) -> str:
         email_fields = [f for f in field_names if "email" in f]
