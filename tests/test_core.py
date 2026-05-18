@@ -1,5 +1,6 @@
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from rest_framework import serializers
 
 from tests.models import (
     Author, Book, Club, Membership,
@@ -7,7 +8,9 @@ from tests.models import (
     UniqueCodeItem,
     ArticleWithLabel, ItemWithLabel, WidgetWithOptionalLabel,
     ProfileWithEmail, RecordWithEmailFallback, MultiFieldRecord,
+    BookWithAllObjects,
 )
+from tombstone import AllObjectsManager, TombstoneSerializerMixin
 from tombstone.conf import tombstone_settings
 from tombstone.exceptions import TombstoneError
 from tombstone.signals import pre_tombstone, post_tombstone
@@ -370,3 +373,61 @@ class TestDeletedLabel(TestCase):
         obj = MultiFieldRecord.objects.create(title="Project Alpha", code="", reference="REF-001")
         tombstone = obj.delete()
         self.assertEqual(tombstone.tombstone_label, "Deleted - Project Alpha REF-001")
+
+
+class TestAllObjectsManager(TestCase):
+    def test_all_objects_includes_tombstones(self):
+        author = Author.objects.create(name="Alice", email="alice@example.com")
+        author.delete()
+        self.assertEqual(Author.objects.count(), 0)
+        self.assertEqual(Author.all_objects.count(), 1)
+
+    def test_objects_excludes_tombstones(self):
+        Author.objects.create(name="Alice", email="alice@example.com")
+        author2 = Author.objects.create(name="Bob", email="bob@example.com")
+        author2.delete()
+        self.assertEqual(Author.objects.count(), 1)
+
+    def test_all_objects_manager_type(self):
+        self.assertIsInstance(Author.all_objects, AllObjectsManager)
+
+    def test_related_accessor_includes_tombstoned_record_via_base_manager(self):
+        author = Author.objects.create(name="Carol", email="carol@example.com")
+        book = BookWithAllObjects.objects.create(title="Test Book", author=author)
+        author.delete()
+
+        book.refresh_from_db()
+        self.assertIsNotNone(book.author)
+        self.assertTrue(book.author.is_tombstone)
+
+
+class TestTombstoneSerializerMixin(TestCase):
+    class _ArticleSerializer(TombstoneSerializerMixin, serializers.ModelSerializer):
+        class Meta:
+            model = ArticleWithLabel
+            fields = [
+                'id', 'title', 'body',
+                'is_tombstone', 'tombstone_label',
+                'tombstone_origin_id', 'tombstoned_at',
+            ]
+
+    def test_to_representation_returns_placeholder_for_tombstone(self):
+        obj = ArticleWithLabel.objects.create(title="Gone", body="content")
+        tombstone = obj.delete()
+
+        data = self._ArticleSerializer(tombstone).data
+
+        self.assertSetEqual(
+            set(data.keys()),
+            {'id', 'is_tombstone', 'tombstone_label', 'tombstone_origin_id', 'tombstoned_at'},
+        )
+        self.assertTrue(data['is_tombstone'])
+        self.assertIn('T', data['tombstoned_at'])  # ISO 8601 separator
+
+    def test_to_representation_passes_through_for_active_record(self):
+        obj = ArticleWithLabel.objects.create(title="Active Article", body="content")
+
+        data = self._ArticleSerializer(obj).data
+
+        self.assertFalse(data['is_tombstone'])
+        self.assertEqual(data['title'], "Active Article")

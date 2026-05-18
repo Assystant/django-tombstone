@@ -139,3 +139,18 @@ class MultiFieldRecord(TombstoneMixin, models.Model):
 
     class Meta:
         app_label = "tests"
+
+
+class BookWithAllObjects(models.Model):
+    """FK to Author — used to test base_manager_name behaviour."""
+    title = models.CharField(max_length=200)
+    author = models.ForeignKey(
+        Author,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='all_books',
+    )
+
+    class Meta:
+        app_label = 'tests'
