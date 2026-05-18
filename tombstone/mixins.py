@@ -6,7 +6,7 @@ from django.db.models.fields.related import ManyToOneRel, ManyToManyRel
 from django.utils import timezone
 
 from .conf import tombstone_settings
-from .managers import TombstoneManager
+from .managers import TombstoneManager, AllObjectsManager
 from .exceptions import TombstoneError
 from .signals import pre_tombstone, post_tombstone
 
@@ -59,12 +59,15 @@ class TombstoneMixin(models.Model):
     tombstone_label = models.CharField(max_length=512, null=True, blank=True)
 
     objects = TombstoneManager()
+    all_objects = AllObjectsManager()
 
     tombstone_ref_behavior = _UNSET
     tombstone_label_field = _UNSET
+    tombstone_preserve_fields = _UNSET
 
     class Meta:
         abstract = True
+        base_manager_name = 'all_objects'
 
     # ------------------------------------------------------------------
     # Public interface
@@ -103,8 +106,14 @@ class TombstoneMixin(models.Model):
     # ------------------------------------------------------------------
 
     def _clear_business_fields(self):
+        preserve = set()
+        if not isinstance(self.tombstone_preserve_fields, _Unset):
+            preserve = set(self.tombstone_preserve_fields)
+
         for field in self._meta.concrete_fields:
             if field.primary_key or field.name in _MIXIN_FIELDS:
+                continue
+            if field.name in preserve or field.attname in preserve:
                 continue
 
             if field.is_relation:
