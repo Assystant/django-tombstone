@@ -6,7 +6,7 @@ from django.db.models.fields.related import ManyToOneRel, ManyToManyRel
 from django.utils import timezone
 
 from .conf import tombstone_settings
-from .managers import TombstoneManager
+from .managers import TombstoneManager, AllObjectsManager
 from .exceptions import TombstoneError
 from .signals import pre_tombstone, post_tombstone
 
@@ -59,12 +59,15 @@ class TombstoneMixin(models.Model):
     tombstone_label = models.CharField(max_length=512, null=True, blank=True)
 
     objects = TombstoneManager()
+    all_objects = AllObjectsManager()
 
     tombstone_ref_behavior = _UNSET
     tombstone_label_field = _UNSET
+    tombstone_preserve_fields = _UNSET
 
     class Meta:
         abstract = True
+        base_manager_name = 'all_objects'
 
     # ------------------------------------------------------------------
     # Public interface
@@ -79,7 +82,7 @@ class TombstoneMixin(models.Model):
         active = _active_keys()
 
         if key in active:
-            return None
+            return self
 
         active.add(key)
         try:
@@ -103,21 +106,42 @@ class TombstoneMixin(models.Model):
     # ------------------------------------------------------------------
 
     def _clear_business_fields(self):
+        preserve = (
+            set(self.tombstone_preserve_fields)
+            if not isinstance(self.tombstone_preserve_fields, _Unset)
+            else set()
+        )
         for field in self._meta.concrete_fields:
-            if field.primary_key or field.name in _MIXIN_FIELDS:
+            if self._should_skip_field(field, preserve):
                 continue
+            self._apply_field_clear(field)
 
-            if field.is_relation:
-                if field.null:
-                    setattr(self, field.attname, None)
-                continue
+    def _should_skip_field(self, field, preserve):
+        if field.primary_key or field.name in _MIXIN_FIELDS:
+            return True
+        if field.name in preserve or field.attname in preserve:
+            return True
+        # auto_now is overwritten by Django in pre_save;
+        # auto_now_add is excluded from UPDATE queries entirely.
+        if getattr(field, 'auto_now', False) or getattr(field, 'auto_now_add', False):
+            return True
+        return False
 
-            if getattr(field, 'unique', False) and not field.null:
-                setattr(self, field.attname, f"__tombstoned__{uuid.uuid4().hex}")
-            elif field.null:
+    def _apply_field_clear(self, field):
+        if field.is_relation:
+            if field.null:
                 setattr(self, field.attname, None)
-            else:
-                setattr(self, field.attname, field.get_default())
+            return
+        if getattr(field, 'unique', False) and not field.null:
+            placeholder = f"__tombstoned__{uuid.uuid4().hex}"
+            max_length = getattr(field, 'max_length', None)
+            if max_length:
+                placeholder = placeholder[:max_length]
+            setattr(self, field.attname, placeholder)
+        elif field.null:
+            setattr(self, field.attname, None)
+        else:
+            setattr(self, field.attname, field.get_default())
 
     def _handle_delete_refs(self, db):
         for field in self._meta.get_fields():
@@ -125,12 +149,22 @@ class TombstoneMixin(models.Model):
                 continue
             if isinstance(field, ManyToOneRel):
                 if self._resolved_behaviour(field.get_accessor_name()) == REF_DELETE:
-                    field.related_model._base_manager.using(db).filter(
+                    mgr = getattr(
+                        field.related_model,
+                        'all_objects',
+                        field.related_model._default_manager,
+                    )
+                    mgr.using(db).filter(
                         **{field.field.name: self.pk}
                     ).delete()
             elif isinstance(field, ManyToManyRel):
                 if self._resolved_behaviour(field.get_accessor_name()) == REF_DELETE:
-                    field.through._default_manager.using(db).filter(
+                    mgr = getattr(
+                        field.through,
+                        'all_objects',
+                        field.through._default_manager,
+                    )
+                    mgr.using(db).filter(
                         **{field.field.m2m_field_name(): self.pk}
                     ).delete()
 
@@ -149,7 +183,7 @@ class TombstoneMixin(models.Model):
         else:
             value = self._resolve_label_from_fields(list(label_field))
 
-        return fmt.replace("%", value)
+        return fmt.replace("%", value)[:512]
 
     def _resolve_label_from_fields(self, field_names: list) -> str:
         email_fields = [f for f in field_names if "email" in f]
