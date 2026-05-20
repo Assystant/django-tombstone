@@ -15,6 +15,10 @@ class TombstoneQuerySet(models.QuerySet):
         """
         Override bulk delete so each object goes through tombstone creation.
         Falls back to Django's delete() for tombstone placeholder rows.
+
+        Performance: this is O(n) — one DELETE-equivalent per row. Signals,
+        field clearing, and ref handling all fire per object. Avoid calling
+        on large querysets where signal correctness is not required.
         """
         active = self.filter(is_tombstone=False)
         count = 0
@@ -25,6 +29,8 @@ class TombstoneQuerySet(models.QuerySet):
 
 
 class TombstoneManager(models.Manager):
+    use_in_migrations = True
+
     def get_queryset(self):
         return TombstoneQuerySet(self.model, using=self._db).active()
 
@@ -32,4 +38,11 @@ class TombstoneManager(models.Manager):
         return TombstoneQuerySet(self.model, using=self._db).tombstones()
 
     def all_records(self):
+        return TombstoneQuerySet(self.model, using=self._db)
+
+
+class AllObjectsManager(models.Manager):
+    use_in_migrations = True
+
+    def get_queryset(self):
         return TombstoneQuerySet(self.model, using=self._db)
