@@ -82,7 +82,7 @@ class TombstoneMixin(models.Model):
         active = _active_keys()
 
         if key in active:
-            return None
+            return self
 
         active.add(key)
         try:
@@ -133,7 +133,11 @@ class TombstoneMixin(models.Model):
                 setattr(self, field.attname, None)
             return
         if getattr(field, 'unique', False) and not field.null:
-            setattr(self, field.attname, f"__tombstoned__{uuid.uuid4().hex}")
+            placeholder = f"__tombstoned__{uuid.uuid4().hex}"
+            max_length = getattr(field, 'max_length', None)
+            if max_length:
+                placeholder = placeholder[:max_length]
+            setattr(self, field.attname, placeholder)
         elif field.null:
             setattr(self, field.attname, None)
         else:
