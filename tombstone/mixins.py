@@ -129,8 +129,6 @@ class TombstoneMixin(models.Model):
 
     def _apply_field_clear(self, field):
         if field.is_relation:
-            if field.null:
-                setattr(self, field.attname, None)
             return
         if getattr(field, 'unique', False) and not field.null:
             placeholder = f"__tombstoned__{uuid.uuid4().hex}"
